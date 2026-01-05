@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
 
+# --------- Accurate Instagram Check Logic ---------
 def check_instagram(username: str):
     username = username.strip().lower()
 
@@ -16,27 +17,50 @@ def check_instagram(username: str):
     url = f"https://www.instagram.com/{username}/"
 
     try:
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        res = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10
+        )
 
-        if res.status_code == 200:
-            is_private = '"is_private":true' in res.text
+        html = res.text.lower()
+
+        # ❌ Real 404
+        if res.status_code == 404:
+            return {"valid": True, "exists": False}
+
+        # ❌ Soft-404 (returns 200 but page not found)
+        soft404_signals = [
+            "page isn't available",
+            "page not found",
+            "user not found",
+            "the link you followed may be broken",
+        ]
+        if any(s in html for s in soft404_signals):
+            return {"valid": True, "exists": False}
+
+        # 🔍 Detect JSON flags inside HTML
+        is_private = '"is_private":true' in html
+        is_verified = '"is_verified":true' in html
+
+        # If JSON flags exist → account exists
+        if '"is_private":' in html or '"is_verified":' in html:
             return {
                 "valid": True,
                 "exists": True,
                 "private": is_private,
+                "verified": is_verified,
                 "url": url
             }
 
-        elif res.status_code == 404:
-            return {"valid": True, "exists": False}
-
+        # ⚠️ Could not confirm
         return {"valid": True, "exists": None}
 
     except Exception:
         return {"valid": True, "exists": None}
 
 
-# ---------- Public API ----------
+# --------- Public API ---------
 @app.get("/api/check")
 def api_check():
     username = request.args.get("u", "").strip()
@@ -44,11 +68,10 @@ def api_check():
     if not username:
         return jsonify({"error": "username param required ?u="}), 400
 
-    data = check_instagram(username)
-    return jsonify(data)
+    return jsonify(check_instagram(username))
 
 
-# ---------- Frontend ----------
+# --------- Frontend ---------
 @app.get("/")
 def home():
     return render_template("index.html")
